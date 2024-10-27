@@ -120,7 +120,9 @@ def get_chat_history(id_chat):
     conn.close()
     return [{"role": "user", "content": message[0]} for message in messages]
 
-
+@app.get("/status")
+def status():
+    return "ok"
 
 @app.post("/api/saveMessage")
 def save_message(saveMessage: saveMessage):
@@ -230,3 +232,8 @@ async def get_chat_history_filtered(idChat: int = None, start_date: str = None, 
         return JSONResponse(status_code=200, content=messages)
     except Exception as e:
         return JSONResponse(status_code=500, content={"message": f"Error al obtener el historial de mensajes: {str(e)}"})
+
+"""
+if __name__ == "__main__":
+    uvicorn.run("main:app", port=8000)
+"""
