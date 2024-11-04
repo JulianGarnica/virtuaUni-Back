@@ -1,5 +1,5 @@
-CREATE DATABASE VirtuaUni;
-USE VirtuaUni;
+CREATE DATABASE virtuauni;
+USE virtuauni;
 
 -- Tabla para guardar tipos de mensajeros
 CREATE TABLE TipoMensajero (
@@ -10,7 +10,7 @@ CREATE TABLE TipoMensajero (
 
 -- Tabla para gestionar los chats
 CREATE TABLE Chats (
-    idChat INT PRIMARY KEY AUTO_INCREMENT,
+    idChat INT PRIMARY KEY,
     nombreEstudiante TEXT,
     correoEstudiante TEXT,
     fechaCreacion DATETIME NOT NULL
@@ -23,8 +23,8 @@ CREATE TABLE Mensajes (
     idTipoMensajero INT,
     mensaje TEXT NOT NULL,
     fecha DATETIME NOT NULL,
-    FOREIGN KEY (idTipoMensajero) REFERENCES TipoMensajero(idTipo),
-    FOREIGN KEY (idChat) REFERENCES Chats(idChat)
+    -- FOREIGN KEY (idTipoMensajero) REFERENCES TipoMensajero(idTipo),
+    -- FOREIGN KEY (idChat) REFERENCES Chats(idChat)
 );
 
 -- Tabla para guardar las calificaciones dadas a un mensajero
@@ -34,9 +34,16 @@ CREATE TABLE Calificaciones (
     calificacion INT NOT NULL CHECK (calificacion BETWEEN 1 AND 5),
     mensaje TEXT,
     fecha DATETIME NOT NULL,
-    FOREIGN KEY (idChat) REFERENCES Chats(idChat)
+    -- FOREIGN KEY (idChat) REFERENCES Chats(idChat)
 );
 
+
+CREATE TABLE Usuarios (
+    idUsuario INT PRIMARY KEY AUTO_INCREMENT,
+    nombre TEXT,
+    correo TEXT,
+    contrasena TEXT
+);
 
 INSERT INTO `TipoMensajero` (`idTipo`, `nombre`) VALUES
 (1, 'user'),

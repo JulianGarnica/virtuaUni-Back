@@ -1,4 +1,5 @@
 import os
+import time
 import mysql.connector
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -11,6 +12,14 @@ from datetime import datetime
 
 # Cargar las variables de entorno
 load_dotenv()
+default_prompt = "Las respuestas que das son cortas y claras, eres una IA de la universidad UNIMINUTO de la sede de Zipaquirá, por lo cual, sólo puedes dar información relacionada con la UNIMINUTO de la sede de Zipaquirá sin nombrar ninguna otra universidad. Te llamas Minuni, siempre que des respuestas, lo vas a hacer de una forma amigable también usando emojis."
+
+# Azure OpenAI Authentication
+endpoint = os.environ["AZURE_OPEN_AI_ENDPOINT"]
+api_key = os.environ["AZURE_OPEN_AI_API_KEY"]
+assistantId = os.environ["AZURE_OPEN_AI_ASSISTANT_ID"]
+deployment = os.environ["AZURE_OPEN_AI_DEPLOYMENT_MODEL"]
+temperature = 0.7
 
 # Conexión a la base de datos MySQL
 def get_db_connection():
@@ -35,26 +44,29 @@ app.add_middleware(
     expose_headers=["X-Chat-ID"]
 )
 
-default_prompt = "Las respuestas que das son cortas y claras, eres una IA de la universidad UNIMINUTO de la sede de Zipaquirá, por lo cual, sólo puedes dar información relacionada con la UNIMINUTO de la sede de Zipaquirá sin nombrar ninguna otra universidad. Te llamas Minuni, siempre que des respuestas, lo vas a hacer de una forma amigable también usando emojis."
 
-# Azure OpenAI Authentication
-endpoint = os.environ["AZURE_OPEN_AI_ENDPOINT"]
-api_key = os.environ["AZURE_OPEN_AI_API_KEY"]
 
 client = openai.AsyncAzureOpenAI(
     azure_endpoint=endpoint,
     api_key=api_key,
-    api_version="2023-09-01-preview"
+    api_version="2024-03-01-preview"
 )
+async def retrieve_assistant():
+    assistant = await client.beta.assistants.retrieve(assistantId)
+
+    return assistant
+
+
+
 
 # Azure OpenAI Model Configuration
-deployment = os.environ["AZURE_OPEN_AI_DEPLOYMENT_MODEL"]
-temperature = 0.7
+
 
 # Prompt
 class Prompt(BaseModel):
     input: str
-    idChat: int = None  # Hacer opcional el idChat
+    idChat: str = None  # Hacer opcional el idChat
+    idRun: str = None  # Hacer opcional el idRun
     nombre: str
     email: str
     default: str = default_prompt
@@ -93,19 +105,21 @@ def save_message_to_db(id_chat, message_content, idTipoMensajero=2):
     conn.close()
 
 # Crear un nuevo chat en la base de datos
-def create_new_chat(nombreEstudiante=None, correoEstudiante=None):
+async def create_new_chat(thread, nombreEstudiante=None, correoEstudiante=None):
+    
     conn = get_db_connection()
     cursor = conn.cursor()
     query = """
-        INSERT INTO Chats (nombreEstudiante, correoEstudiante, fechaCreacion)
-        VALUES (%s, %s, %s)
+        INSERT INTO Chats (idChat, nombreEstudiante, correoEstudiante, fechaCreacion)
+        VALUES (%s, %s, %s, %s)
     """
-    cursor.execute(query, (nombreEstudiante, correoEstudiante, datetime.now()))  # Asumiendo que idMensajero puede ser nulo
+    cursor.execute(query, (thread.id, nombreEstudiante, correoEstudiante, datetime.now()))  # Asumiendo que idMensajero puede ser nulo
     conn.commit()
-    new_chat_id = cursor.lastrowid
     cursor.close()
     conn.close()
-    return new_chat_id
+    return thread.id
+
+
 
 # Recuperar historial de mensajes de la base de datos
 def get_chat_history(id_chat):
@@ -120,6 +134,65 @@ def get_chat_history(id_chat):
     conn.close()
     return [{"role": "user", "content": message[0]} for message in messages]
 
+async def send_message(idChat,inputValue):
+    message = await client.beta.threads.messages.create(
+        thread_id=idChat,
+        role="user",
+        content=inputValue
+    )
+    return message
+async def get_message(idChat, idRun, inputValue):
+    while True:
+        runInfo = await client.beta.threads.runs.retrieve(thread_id=idChat, run_id=idRun)
+        
+        if runInfo.completed_at:
+            # elapsed = runInfo.completed_at - runInfo.created_at
+            # elapsed = time.strftime("%H:%M:%S", time.gmtime(elapsed))
+            print(f"Run completed")
+            messages = await client.beta.threads.messages.list(idChat)
+            messageResponse = messages.data[0].content[0].text.value
+            break
+        else:
+            print(runInfo)
+            messageResponse = "Error al obtener la respuesta, ¡vuélvelo a intentar!"
+            break
+        print("Waiting 1sec...")
+        time.sleep(1)
+    
+    
+    save_message_to_db(idChat, inputValue, 1)
+    save_message_to_db(idChat, messageResponse)
+    return messageResponse
+
+async def chat(prompt):
+    assistant = await retrieve_assistant()
+        
+    if prompt.idChat is None:
+        thread = await client.beta.threads.create()
+        prompt.idChat = await create_new_chat(thread, prompt.nombre, prompt.email)
+        
+        print("New chat created with id:", prompt.idChat)
+            
+    await send_message(prompt.idChat, prompt.input)
+    
+    runCreate = await client.beta.threads.runs.create(
+        thread_id=prompt.idChat,
+        assistant_id=assistant.id
+    )
+    prompt.idRun = runCreate.id 
+
+    print("Actual idChat:", prompt.idChat)
+    print("Actual idRun:", prompt.idRun)
+    
+    messageResponse = ""
+    
+    messageResponse = await get_message(prompt.idChat, prompt.idRun, prompt.input)
+    # Retornar la respuesta junto con el idChat
+    return JSONResponse(
+        status_code=200,
+        content={"message": messageResponse, "idChat": prompt.idChat, "idRun": prompt.idRun}
+    )
+
 @app.get("/status")
 def status():
     return "ok"
@@ -132,31 +205,12 @@ def save_message(saveMessage: saveMessage):
 # API Endpoint para el chat
 @app.post("/api/stream")
 async def stream(prompt: Prompt):
-    # Crear un nuevo chat si no se proporciona idChat
-    if prompt.idChat is None:
-        prompt.idChat = create_new_chat(prompt.nombre, prompt.email)
+    response = await chat(prompt)
+    return response
 
-    # Obtener el historial de la conversación
-    chat_history = get_chat_history(prompt.idChat)
 
-    # Añadir el mensaje actual del usuario
-    chat_history.append({"role": "user", "content": prompt.input})
-    save_message_to_db(prompt.idChat, prompt.input, 1)
 
-    # Generar la respuesta de la IA
-    azure_open_ai_response = await client.chat.completions.create(
-        model=deployment,
-        temperature=temperature,
-        messages=[{"role": "system", "content": default_prompt}] + chat_history,
-        stream=True
-    )
-
-    # Retornar la respuesta junto con el idChat
-    return StreamingResponse(
-        stream_processor(azure_open_ai_response, prompt.idChat),
-        media_type="text/event-stream",
-        headers={"X-Chat-ID": str(prompt.idChat)}  # Devolver el idChat en el header
-    )
+        
 
 # Endpoint para enviar calificaciones
 @app.post("/api/rate")
@@ -235,5 +289,6 @@ async def get_chat_history_filtered(idChat: int = None, start_date: str = None, 
 
 """
 if __name__ == "__main__":
+
     uvicorn.run("main:app", port=8000)
 """
