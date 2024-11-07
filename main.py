@@ -152,7 +152,7 @@ async def get_message(idChat, idRun, inputValue):
             messages = await client.beta.threads.messages.list(idChat)
             messageResponse = messages.data[0].content[0].text.value
             break
-        else:
+        elif runInfo.failed_at or runInfo.cancelled_at:
             print(runInfo)
             messageResponse = "Error al obtener la respuesta, ¡vuélvelo a intentar!"
             break
