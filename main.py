@@ -17,7 +17,7 @@ default_prompt = "Las respuestas que das son cortas y claras, eres una IA de la 
 # Azure OpenAI Authentication
 endpoint = os.environ["AZURE_OPEN_AI_ENDPOINT"]
 api_key = os.environ["AZURE_OPEN_AI_API_KEY"]
-assistantId = os.environ["AZURE_OPEN_AI_ASSISTANT_ID"]
+assistantId = os.environ["OPENAI_ASSISTANT_ID"]
 deployment = os.environ["AZURE_OPEN_AI_DEPLOYMENT_MODEL"]
 temperature = 0.7
 
@@ -46,11 +46,7 @@ app.add_middleware(
 
 
 
-client = openai.AsyncAzureOpenAI(
-    azure_endpoint=endpoint,
-    api_key=api_key,
-    api_version="2024-03-01-preview"
-)
+client = openai.AsyncOpenAI()
 async def retrieve_assistant():
     assistant = await client.beta.assistants.retrieve(assistantId)
 
@@ -177,7 +173,7 @@ async def chat(prompt):
     
     runCreate = await client.beta.threads.runs.create(
         thread_id=prompt.idChat,
-        assistant_id=assistant.id
+        assistant_id=assistant.id,
     )
     prompt.idRun = runCreate.id 
 
@@ -287,8 +283,7 @@ async def get_chat_history_filtered(idChat: int = None, start_date: str = None, 
     except Exception as e:
         return JSONResponse(status_code=500, content={"message": f"Error al obtener el historial de mensajes: {str(e)}"})
 
-"""
+
 if __name__ == "__main__":
 
     uvicorn.run("main:app", port=8000)
-"""
